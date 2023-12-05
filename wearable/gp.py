@@ -30,7 +30,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.use('Agg')
 
-def train_sample_gp(x_train, y_train, x_test, gp_epochs=50, device='cuda'):
+def train_sample_gp(x_train, y_train, x_test, gp_epochs=25, device='cuda'):
     # gp model
     #likelihood = gpytorch.likelihoods.GaussianLikelihood()
     likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks=y_train.shape[1])
@@ -57,7 +57,6 @@ def train_sample_gp(x_train, y_train, x_test, gp_epochs=50, device='cuda'):
     x_train = x_train.to(device)
     y_train = y_train.to(device)
     x_test = x_test.to(device)
-    t0 = time.time()
 
     # train loop
     for i in range(gp_epochs):
@@ -65,8 +64,8 @@ def train_sample_gp(x_train, y_train, x_test, gp_epochs=50, device='cuda'):
 
         output = model(x_train)
         loss = -mll(output, y_train)
-        loss.backward()
 
+        loss.backward()
         optimizer.step()
 
     # get new points
