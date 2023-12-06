@@ -21,7 +21,7 @@ def main():
         loaders.append(wearable_loader(args, mode))
 
     # make transformer model
-    model = Transformer(in_size=4, out_size=5, d_model=args.n_samples).to(args.device)
+    model = Transformer(in_size=4, out_size=6, d_model=args.n_samples).to(args.device)
 
     # add paramters from encoder and model
     optim = Lion(params=list(model.parameters()), lr=args.lr, weight_decay=1e-2) 

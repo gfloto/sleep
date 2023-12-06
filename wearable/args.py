@@ -15,7 +15,7 @@ def get_args():
 
     parser.add_argument('--lr', type=float, default=1e-6, help='learning rate')
     parser.add_argument('--epochs', type=int, default=500, help='number of epochs to train for')
-    parser.add_argument('--batch_size', type=int, default=4, help='input batch size')
+    parser.add_argument('--batch_size', type=int, default=3, help='input batch size')
     parser.add_argument('--workers', type=int, default=0, help='number of workers for dataloader')
 
     parser.add_argument('--transfer', action='store_true', help='transfer learning mode')

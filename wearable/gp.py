@@ -5,7 +5,7 @@ import numpy as np
 
 '''
 train a gp on a sample of data
-sample from this at given points to generate training data
+save gp state where predictions can easily be made on new data
 '''
 
 class GP(gpytorch.models.ExactGP):
@@ -30,7 +30,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.use('Agg')
 
-def train_sample_gp(x_train, y_train, x_test, gp_epochs=25, device='cuda'):
+def train_sample_gp(x_train, y_train, x_test, mode, gp_epochs=25, device='cuda'):
     # gp model
     #likelihood = gpytorch.likelihoods.GaussianLikelihood()
     likelihood = gpytorch.likelihoods.MultitaskGaussianLikelihood(num_tasks=y_train.shape[1])
@@ -41,11 +41,10 @@ def train_sample_gp(x_train, y_train, x_test, gp_epochs=25, device='cuda'):
         likelihood.noise = 1e-3
 
     # set fixed noise and lengthscale
-    params = set(model.parameters())
-    final_params = list(params)
+    #final_params = list(params)
         #- {model.covar.base_kernel.raw_lengthscale}
         #- {likelihood.noise_covar.raw_noise})
-    optimizer = torch.optim.Adam(params, lr=0.25)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.25)
 
     # loss function (marginal log-likelihood) 
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood, model)
@@ -76,15 +75,18 @@ def train_sample_gp(x_train, y_train, x_test, gp_epochs=25, device='cuda'):
     with torch.no_grad(), gpytorch.settings.fast_pred_var():
         pred = likelihood(model(x_test))
         sample = pred.sample()
+        #gp_pred = {
+            #'mean' : pred.mean.cpu(),
+            #'std' : pred.stddev.cpu(),
+        #}
 
-        lower, upper = pred.confidence_region()
-
+    return sample.cpu()
     #plot_sample(x_train, y_train, x_test, sample, pred)
-    return sample.detach().cpu()
 
-
-def plot_sample(x_train, y_train, x_test, sample, pred):
+def plot_sample(x_train, y_train, x_test, pred):
     size = x_train.shape[1]
+    sample = pred.sample()
+
     x_train = x_train.detach().cpu(); y_train = y_train.detach().cpu()
     x_test = x_test.detach().cpu(); sample = sample.detach().cpu()
 

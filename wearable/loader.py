@@ -2,30 +2,42 @@ import os
 import json
 import numpy as np
 import pandas as pd
+from einops import rearrange
 
 import torch
 from torch.utils.data import Dataset, DataLoader
-
-import gpytorch
 from gp import train_sample_gp 
 
 def wearable_loader(args, mode):
     assert mode in ['train', 'valid', 'test']
 
-    data_path = args.data_path
     batch_size = args.batch_size
     workers = args.workers
 
-    dataset = WearableDataset(args.data_path, mode)
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=workers)
+    dataset = WearableDataset(args.data_path, mode, args.n_samples)
+    loader = DataLoader(
+        dataset, collate_fn=collate_fn, batch_size=batch_size,
+        shuffle=True, num_workers=workers,
+    )
     return loader
+
+# the same as torch default collate_fn, but removes None (for valid and test)
+def collate_fn(batch):
+    x, tgt = zip(*batch)
+    # remove None
+    x = [x_ for x_ in x if x_ is not None]
+    tgt = [tgt_ for tgt_ in tgt if tgt_ is not None]
+
+    x = torch.stack(x, dim=0)
+    tgt = torch.stack(tgt, dim=0)
+    return x, tgt
 
 '''
 torch dataloader and dataset for wearable
 '''
 
 class WearableDataset(Dataset):
-    def __init__(self, data_path, mode, n_samples=64, num_iters=1000):
+    def __init__(self, data_path, mode, n_samples, num_iters=1000):
         self.mode = mode
         self.n_samples = n_samples
         self.num_iters = num_iters
@@ -52,7 +64,7 @@ class WearableDataset(Dataset):
         self.user_t_idx = {}
         if mode in ['train', 'valid']:
             for user_id in self.user_ids:
-                T = len(self.user_data[user_id]['labels'])
+                T = len(self.user_data[user_id]['labels']) - 1
                 t_idx = torch.randperm(T)
 
                 t_split = int(0.9 * T)
@@ -64,23 +76,18 @@ class WearableDataset(Dataset):
         # follow similar pattern for test
         else:
             for user_id in self.user_ids:
-                t_idx = torch.arange(len(self.user_data[user_id]['labels']))
+                t_idx = torch.arange(len(self.user_data[user_id]['labels']) - 1)
                 self.user_t_idx[user_id] = t_idx
 
         # create a map from idx : (user_id, t_idx) for valid and test  
-        if mode in ['valid', 'test']:
-            self.idx2t = {}
-            idx = 0
-            for user_id in self.user_ids:
-                for t_idx in self.user_t_idx[user_id]:
-                    self.idx2t[idx] = (user_id, t_idx)
-                    idx += 1
+        self.idx2t = {}
+        idx = 0
+        for user_id in self.user_ids:
+            for t_idx in self.user_t_idx[user_id]:
+                self.idx2t[idx] = (user_id, t_idx.item())
+                idx += 1
     
-    def __len__(self): 
-        if self.mode == 'train': return self.num_iters
-        elif self.mode == 'valid':
-            return sum([len(self.user_t_idx[user_id]) for user_id in self.user_ids])
-        return self.num_iters
+    def __len__(self): return len(self.idx2t)
     
     # load all data dataframes for a user
     def load_data(self, user_id):
@@ -91,56 +98,49 @@ class WearableDataset(Dataset):
             fname = os.path.join(self.data_path, user_id + '_' + folder + '.parquet')
             df = pd.read_parquet(fname)
 
-            # normalize all columns
-            normalize = lambda x : (x - np.mean(x, axis=0)) / np.std(x, axis=0)
-            df[df.columns] = df[df.columns].apply(normalize)
+            # normalize all columns exept labels and time
+            if folder != 'labels':
+                normalize = lambda x : (x - np.mean(x, axis=0)) / np.std(x, axis=0)
+                df[df.columns[1:]] = df[df.columns[1:]].apply(normalize)
             data.append(df)
         
         return {folders[i] : data[i] for i in range(len(folders))}
-
-    def __getitem__(self, idx):
-        if self.mode == 'train': return self.get_train()
-        elif self.mode == 'valid': return self.get_valid(idx)
-        elif self.mode == 'test': return self.get_test(idx)
 
     # sample a single valid time point 
     def sample_t_train(self, user_id):
         t_idx = self.user_t_idx[user_id]
         return t_idx[torch.randint(len(t_idx), (1,))].item()
 
-    def get_train(self):
-        while True:
-            idx = np.random.randint(len(self.user_ids))
-            user_id = self.user_ids[idx]
-            data = self.user_data[user_id]
+    def __getitem__(self, idx):
+        # get user_id and time window
+        user_id, t = self.idx2t[idx]
+        data = self.user_data[user_id]
 
-            # sample window of time (30s)
-            t = self.sample_t_train(user_id)
-            label = data['labels']['label'][t]
+        label = data['labels']['label'].iloc[t]
+        if label != 5: label += 1
 
-            # get start and end indices
-            t_start = data['labels']['time'][t]
-            t_end = data['labels']['time'][t + 1]
+        # get start and end indices
+        t_start = data['labels']['time'].iloc[t]
+        t_end = data['labels']['time'].iloc[t+1]
 
-            # get heart rate and motion data in window
-            heart_rate = data['heart_rate'][(data['heart_rate']['time'] >= t_start) & (data['heart_rate']['time'] < t_end)]
-            motion = data['motion'][(data['motion']['time'] >= t_start) & (data['motion']['time'] < t_end)]
-            if len(heart_rate) == 0 and len(motion) == 0: continue
+        # get heart rate and motion data in window
+        heart_rate = data['heart_rate'][(data['heart_rate']['time'] >= t_start) & (data['heart_rate']['time'] < t_end)]
+        motion = data['motion'][(data['motion']['time'] >= t_start) & (data['motion']['time'] < t_end)]
+        if len(heart_rate) == 0 and len(motion) == 0: return None, None
 
-            # convert to numpy -> torch
-            hr_t = torch.tensor( heart_rate['time'].values ).float()
-            m_t = torch.tensor( motion['time'].values ).float()
-            heart_rate = torch.tensor( heart_rate['heart_rate'].values ).float()[:, None]
-            motion = torch.tensor( motion[['x', 'y', 'z']].values ).float()
+        # convert to numpy -> torch
+        hr_t = torch.tensor( heart_rate['time'].values ).float()
+        m_t = torch.tensor( motion['time'].values ).float()
+        heart_rate = torch.tensor( heart_rate['heart_rate'].values ).float()[:, None]
+        motion = torch.tensor( motion[['x', 'y', 'z']].values ).float()
 
-            if heart_rate.shape[0] <= 2: continue
-            if motion.shape[0] <= self.n_samples: continue
-            break
+        if heart_rate.shape[0] <= 2 or motion.shape[0] <= 2: return None, None
 
         # sample evenly spaced points from gaussian process
         hr_sample = self.sample_gp(hr_t, heart_rate, self.n_samples)
         m_sample = self.sample_gp(m_t, motion, self.n_samples)
         x = torch.cat((hr_sample, m_sample), dim=-1)
+        x = rearrange(x, 'n d -> d n')
 
         return x, torch.tensor(label).long()
 
@@ -170,7 +170,7 @@ class WearableDataset(Dataset):
         t_test = torch.linspace(0, 1, n_samples)
         t_test = torch.stack([t_test for _ in range(y.shape[1])], dim=1)
 
-        y_out = train_sample_gp(t, y_, t_test)
+        y_out = train_sample_gp(t, y_, t_test, self.mode)
 
         # renormalize before outputting
         y_out = y_out * std + mean
