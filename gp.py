@@ -81,7 +81,7 @@ def train_sample_gp(x_train, y_train, x_test, gp_epochs=50, device='cuda'):
 
     # check that mean and std are reasonable, otherwise return None
     if torch.any( gp_pred['mean'].abs() > 12 ):
-        print(f'gp error: mean {gp_pred["mean"].max()}')
+        print(f'gp error: mean max {gp_pred["mean"].abs().max()}')
         return None
     else: return gp_pred
 

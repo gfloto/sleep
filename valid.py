@@ -5,14 +5,13 @@ import torch
 from einops import rearrange
 
 # main test loop
-#@torch.no_grad()
+@torch.no_grad()
 def valid(model, loader, device):
     model.eval()
 
     # main test loop
     tgt_track = None; pred_track = None
     for i, (x, tgt) in enumerate(tqdm(loader)):
-        if i == 50: break
         x = x.to(device); tgt = tgt.to(device)
 
         # forward pass

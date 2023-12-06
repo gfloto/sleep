@@ -62,25 +62,30 @@ def sample_gp(t, y, n_samples):
         return gp_pred
 
 if __name__ == '__main__':
-    data_path = '/home/gfloto/bio/wearable/data' 
+    load_path = '/home/gfloto/bio/raw-data/wearable/post-proc' 
+    save_path = '/home/gfloto/bio/data/wearable/'
     n_samples = 128
-    user_ids = json.load(open(os.path.join(data_path, 'user_ids.json'))) 
+    user_ids = json.load(open(os.path.join(load_path, 'user_ids.json'))) 
+
+    # save copy of user ids
+    with open(os.path.join(save_path, 'user_ids.json'), 'w') as f:
+        json.dump(user_ids, f) 
 
     # each user has dataframes for: labels, heart_rate, motion
     print('loading data')
-    user_data = {user_id : load_data(user_id, data_path) for user_id in user_ids}
+    user_data = {user_id : load_data(user_id, load_path) for user_id in user_ids}
     print('done')
-
-    dset = {
-        'user_id' : [],
-        'label' : [],
-        'time' : [],
-        'gp-path' : [],
-    }
 
     # train gp on each user's data
     for i, user_id in enumerate(user_ids):
+        if i < 30: continue
         print(f'processing user {i+1}/{len(user_ids)}')
+        dset = {
+            'user_id' : [],
+            'label' : [],
+            'time' : [],
+            'gp-path' : [],
+        }
 
         # gather data in k - 30 second windows
         k = 4
@@ -115,21 +120,30 @@ if __name__ == '__main__':
             m_gp = sample_gp(m_t, motion, n_samples)
             if hr_gp is None or m_gp is None: continue
 
-            gp = {
-                'mean' : torch.cat((hr_gp['mean'], m_gp['mean']), dim=-1).T,
-                'std' : torch.cat((hr_gp['std'], m_gp['std']), dim=-1).T,
-            }
+            try:
+                gp = {
+                    'mean' : torch.cat((hr_gp['mean'], m_gp['mean']), dim=-1).T,
+                    'std' : torch.cat((hr_gp['std'], m_gp['std']), dim=-1).T,
+                }
+            except: print('weird...')
 
             # save gp preditions
-            save_path = os.path.join(data_path, 'gp_preds', f'{user_id}-{t_start}.pt')
-            torch.save(gp, save_path)
+            gp_path = os.path.join(save_path, 'gp_preds', f'{user_id}-{t_start}.pt')
+            torch.save(gp, gp_path)
 
             # save data
             dset['user_id'].append(user_id)
             dset['label'].append(label)
             dset['time'].append(t)
-            dset['gp-path'].append(save_path)
+            dset['gp-path'].append(gp_path)
 
-    # save dataset as parquet
-    dset = pd.DataFrame(dset)
-    dset.to_parquet(os.path.join(data_path, 'wearable.parquet'))
+        # save dataset as parquet
+        dset = pd.DataFrame(dset)
+        dset.to_parquet(os.path.join(save_path, f'user-{user_id}.parquet'))
+
+    # load all dataframes into one and save
+    dset = []
+    for user_id in user_ids:
+        dset.append( pd.read_parquet(os.path.join(save_path, f'user-{user_id}.parquet')) )
+    dset = pd.concat(dset)
+    dset.to_parquet(os.path.join(save_path, 'wearable.parquet'))

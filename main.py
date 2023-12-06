@@ -9,6 +9,7 @@ from train import train
 from loader import wearable_loader
 from models import Transformer
 from plot import plot_loss
+from metrics import save_metrics
 
 def main():
     args = get_args()
@@ -21,13 +22,15 @@ def main():
         loaders.append(wearable_loader(args, mode))
 
     # make transformer model
-    model = Transformer(in_size=4, out_size=6, d_model=args.n_samples).to(args.device)
+    model = Transformer(in_size=8, out_size=1, d_model=args.n_samples).to(args.device)
 
     # add paramters from encoder and model
-    optim = Lion(params=list(model.parameters()), lr=args.lr, weight_decay=1e-2) 
+    #optim = Lion(params=list(model.parameters()), lr=args.lr, weight_decay=1e-2) 
+    optim = torch.optim.Adam(params=list(model.parameters()), lr=args.lr, weight_decay=5e-2)
     print(f'number of parameters: {sum(p.numel() for p in model.parameters())}')
 
-    loss_fn = torch.nn.CrossEntropyLoss()
+    # binary cross entropy loss
+    loss_fn = torch.nn.BCEWithLogitsLoss()
 
     # load model and optimizer if resuming training
     if args.resume_path is not None:
@@ -46,7 +49,7 @@ def main():
 
     # main training loop
     for epoch in range(args.epochs):
-        train_loss, valid_loss = train(model, loaders, loss_fn, optim, args)
+        train_loss, valid_loss, valid_data = train(model, loaders, loss_fn, optim, args)
 
         # save training and validation loss
         train_track.append(train_loss); valid_track.append(valid_loss)
@@ -61,10 +64,12 @@ def main():
             torch.save(model.state_dict(), os.path.join(save_path, 'model.pt'))
             torch.save(optim.state_dict(), os.path.join(save_path, 'optim.pt'))
 
+            # save aucroc
+            save_metrics(valid_data, args.test_name)
+
         # early stopping
-        if len(valid_track) > args.early_stop: 
-            valid_track.pop(0)
-        if np.argmin(valid_track) == 0 and epoch > args.early_stop: 
+        last_n = valid_track[-args.early_stop:]            
+        if np.argmin(last_n) == 0 and epoch > args.early_stop: 
             print('early stopping')
             break
 

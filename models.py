@@ -111,23 +111,28 @@ class Transformer(torch.nn.Module):
     def __init__(self, in_size, out_size, d_model, cond_len=64):
         super(Transformer, self).__init__()
         self.in_size = in_size
+        self.n_filters = 32
         self.out_size = out_size
         self.d_model = d_model
 
-        self.N = 6
+        self.N = 4
         self.n_head = 1
-        self.d_ff = 2048
+        self.d_ff = 512
         self.dropout = 0.1
+
+        # initial convolutions
+        a = self.n_filters * self.in_size
+        self.conv_in = nn.Conv1d(self.in_size, a, kernel_size=5, stride=1, padding=2)
 
         # make main model
         c = copy.deepcopy
-        attn = MultiHeadedAttention(self.n_head, self.d_model, self.in_size, cond_len)
+        attn = MultiHeadedAttention(self.n_head, self.d_model, a, cond_len)
         ff = FeedForward(self.d_model, self.d_ff)
 
         block = TransformerLayer(self.d_model, c(attn), c(ff), self.dropout)
         self.blocks = clones(block, self.N)
         self.norm = LayerNorm(self.d_model)
-        self.linear = nn.Linear(self.in_size * self.d_model, self.out_size)
+        self.linear = nn.Linear(a * self.d_model, self.out_size)
 
         # init weights
         for p in self.parameters():
@@ -135,12 +140,14 @@ class Transformer(torch.nn.Module):
                 nn.init.xavier_uniform(p)
 
     def forward(self, x, cond):
+        x = self.conv_in(x)
+
         for block in self.blocks:
             x = block(x, cond)
         x = self.norm(x)
         x = rearrange(x, 'b f d -> b (f d)')
 
         x = self.linear(x).squeeze(-1)
-        x = nn.functional.softmax(x, dim=-1)
+        #x = nn.functional.softmax(x, dim=-1)
     
         return x

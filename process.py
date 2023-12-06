@@ -1,6 +1,5 @@
 import os
 import json
-import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
@@ -26,13 +25,13 @@ col_map = {
 }
 
 # select load function based on folder
-def load_data(fname, folders):
+def load_data(fname, folders, load_path):
     assert folders[0] == 'labels'
 
     data = []
     for folder in folders:
         # load file
-        fname = os.path.join(folder, user_id + name_map[folder])
+        fname = os.path.join(load_path, folder, user_id + name_map[folder])
         sep = load_sep[folder]
         df = pd.read_csv(fname, sep=sep, header=None)
 
@@ -54,23 +53,26 @@ create pandas df to store all data and labels
 
 if __name__ == '__main__':
     check = None
+    load_path = '/home/gfloto/bio/raw-data/wearable'
+    save_path = '/home/gfloto/bio/raw-data/wearable/post-proc'
+
     folders = ['labels', 'heart_rate', 'motion']
     df_build = {f : [] for f in folders}
     df_build['user_id'] = []
 
     # get all user ids (assuming folder symmetry)
-    files = os.listdir('labels')
+    files = os.listdir(os.path.join(load_path, 'labels'))
     user_ids = [f.split('_')[0] for f in files]
 
     # save user ids in json
-    with open(os.path.join('data', 'user_ids.json'), 'w') as f:
+    with open(os.path.join(save_path, 'user_ids.json'), 'w') as f:
         json.dump(user_ids, f)
 
     # load each file, convert to numpy, store in df
     for user_id in tqdm(user_ids):
-        labels, heart_rate, motion = load_data(user_id, folders)
+        labels, heart_rate, motion = load_data(user_id, folders, load_path)
 
         # save dataframes as parquet files
-        labels.to_parquet(os.path.join('data', user_id + '_labels.parquet'))
-        heart_rate.to_parquet(os.path.join('data', user_id + '_heart_rate.parquet'))
-        motion.to_parquet(os.path.join('data', user_id + '_motion.parquet'))
+        labels.to_parquet(os.path.join(save_path, user_id + '_labels.parquet'))
+        heart_rate.to_parquet(os.path.join(save_path, user_id + '_heart_rate.parquet'))
+        motion.to_parquet(os.path.join(save_path, user_id + '_motion.parquet'))
